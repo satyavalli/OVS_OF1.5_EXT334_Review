@@ -16,7 +16,6 @@
 
 #include <config.h>
 #include "nx-match.h"
-#include "ox-stat.h"
 #include <netinet/icmp6.h>
 #include "classifier.h"
 #include "colors.h"
@@ -34,6 +33,7 @@
 #include "tun-metadata.h"
 #include "unaligned.h"
 #include "util.h"
+#include "ox-stat.h"
 
 VLOG_DEFINE_THIS_MODULE(ox_stat);
 
@@ -128,9 +128,9 @@ uint8_t oxs_field_set;
 static const struct oxs_field *oxs_field_by_header(uint32_t header);
 static const struct oxs_field *oxs_field_by_id(enum oxs_ofb_stat_fields,
                                                enum ofp_version);
-int oxs_put_stat(struct ofpbuf *b, struct ofputil_flow_stats *fs,
-                 enum ofp_version version);
-
+void oxs_put__(struct ofpbuf *b, enum oxs_ofb_stat_fields field,
+               enum ofp_version version,
+               const void *value, const void *mask, size_t n_bytes);
 static bool
 is_experimenter_oxs(uint64_t header)
 {
@@ -206,6 +206,174 @@ error:
     return OFPERR_OFPBMC_BAD_LEN;
 }
 
+static enum ofperr
+oxs_pull_entry__(struct ofpbuf *b, uint64_t *header,
+                 const struct oxs_field **field_,struct ofputil_flow_stats *fs)
+{
+    const struct oxs_field *field;
+    enum ofperr header_error;
+    unsigned int payload_len;
+    const uint8_t *payload;
+
+    header_error = oxs_pull_header__(b, header, &field);
+
+    if (header_error && header_error != OFPERR_OFPBMC_BAD_FIELD) {
+        return header_error;
+    }
+
+    payload_len = oxs_payload_len(*header);
+    payload = ofpbuf_try_pull(b, payload_len);
+    if (!payload) {
+        return OFPERR_OFPBMC_BAD_LEN;
+    }
+
+    if(fs && field){
+      switch(field->id)
+      {
+            case OFPXST_OFB_DURATION:
+            {
+                    uint64_t duration=0;
+                    memcpy(&duration,payload,sizeof(duration));
+                            duration = ntohll(duration);
+                     fs->duration_sec = ((uint32_t)((duration &
+                                          0xFFFFFFFF00000000) >> 32));
+                     fs->duration_nsec = ((uint32_t)(duration & 0xFFFFFFFF));
+            }
+            break;
+            case OFPXST_OFB_IDLE_TIME:
+            {
+                    uint64_t idle_time=0;
+                    memcpy(&idle_time,payload,sizeof(idle_time));
+                            idle_time = ntohll(idle_time);
+                     fs->idle_age = ((idle_time & 0xFFFFFFFF00000000)  >> 32);
+            }
+            break;
+            case OFPXST_OFB_PACKET_COUNT:
+            {
+                    uint64_t packet_count;
+                    memcpy(&packet_count,payload,sizeof(packet_count));
+                    fs->packet_count = ntohll(packet_count);
+            }
+            break;
+            case OFPXST_OFB_BYTE_COUNT:
+            {
+                    uint64_t byte_count;
+                    memcpy(&byte_count,payload,sizeof(byte_count));
+                    fs->byte_count = ntohll(byte_count);
+            }
+            break;
+            case OFPXST_OFB_FLOW_COUNT:
+            break;
+        }
+     }
+
+     if (field_) {
+         *field_ = field;
+         return header_error;
+     }
+
+     return 0;
+}
+
+static enum ofperr
+oxs_pull_match_entry(struct ofpbuf *b,
+                     const struct oxs_field **field,
+                     struct ofputil_flow_stats *fs)
+{
+    enum ofperr error;
+    uint64_t header;
+
+    error = oxs_pull_entry__(b, &header, field,fs);
+    if (error) {
+        return error;
+    }
+   return 0;
+}
+
+static enum ofperr
+oxs_pull_raw(const uint8_t *p, unsigned int stat_len,
+             struct ofputil_flow_stats *fs,
+             ovs_be64 *cookie, ovs_be64 *cookie_mask)
+{
+    ovs_assert((cookie != NULL) == (cookie_mask != NULL));
+    if (cookie) {
+        *cookie = *cookie_mask = htonll(0);
+    }
+
+    struct ofpbuf b = ofpbuf_const_initializer(p, stat_len);
+
+    while (b.size) {
+        const uint8_t *pos = b.data;
+        const struct oxs_field *field;
+        union mf_value value;
+        union mf_value mask;
+        enum ofperr error;
+        error = oxs_pull_match_entry(&b, &field,fs);
+        if (error) {
+            if (error == OFPERR_OFPBMC_BAD_FIELD && !false) {
+                continue;
+            }
+        }
+        else if (!field) {
+             if (!cookie) {
+                error = OFPERR_OFPBMC_BAD_FIELD;
+            } else if (*cookie_mask) {
+                error = OFPERR_OFPBMC_DUP_FIELD;
+            } else {
+                *cookie = value.be64;
+                *cookie_mask = mask.be64;
+            }
+      }
+      else {
+            if(field->id == OFPXST_OFB_DURATION) {
+                 oxs_field_set |= 1<<0;
+            } else if(field->id == OFPXST_OFB_IDLE_TIME) {
+                 oxs_field_set |= 1<<1;
+            } else if(field->id == OFPXST_OFB_FLOW_COUNT) {
+                 oxs_field_set |= 1<<2;
+            } else if(field->id == OFPXST_OFB_PACKET_COUNT) {
+                 oxs_field_set |= 1<<3;
+            } else if(field->id == OFPXST_OFB_BYTE_COUNT) {
+                 oxs_field_set |= 1<<4;
+            }
+          }
+        if (error) {
+            VLOG_DBG_RL(&rl, "error parsing OXS at offset %"PRIdPTR" "
+                        "within match (%s)", pos -
+                        p, ofperr_to_string(error));
+            return error;
+        }
+    }
+    return 0;
+}
+
+int oxs_pull_stat(struct ofpbuf *b,struct ofputil_flow_stats *fs,
+                  uint16_t *statlen)
+{
+    struct  ofp_oxs_stat *oxs = b->data;
+    uint8_t *p;
+    uint16_t stat_len;
+    stat_len = ntohs(oxs->length);
+    if (stat_len < sizeof *oxs) {
+        return OFPERR_OFPBMC_BAD_LEN;
+    }
+
+    p = ofpbuf_try_pull(b, ROUND_UP(stat_len, 8));
+    if (!p) {
+        VLOG_DBG_RL(&rl, "oxs length %u, rounded up to a "
+                    "multiple of 8, is longer than space in message (max "
+                    "length %"PRIu32")", stat_len, b->size);
+        return OFPERR_OFPBMC_BAD_LEN;
+    }
+    *statlen = ROUND_UP(stat_len, 8);
+    return oxs_pull_raw(p + sizeof *oxs, stat_len - sizeof *oxs,fs,
+                         NULL, NULL);
+}
+
+static struct hmap oxs_header_map;
+static struct hmap oxs_name_map;
+
+
 static void
 oxs_init(void)
 {
@@ -228,5 +396,148 @@ oxs_init(void)
     }
 }
 
+static const struct oxs_field *
+oxs_field_by_header(uint32_t header)
+{
+   const struct oxs_field_index *oxfs;
+   uint32_t header_no_len;
 
+   oxs_init();
+
+   header_no_len = oxs_header_no_len(header);
+   HMAP_FOR_EACH_IN_BUCKET (oxfs, header_node, hash_int(header_no_len,0),
+                            &oxs_header_map) {
+     if (header_no_len == oxs_header_no_len(oxfs->fs.header)) {
+       if (OXS_LENGTH(header) == OXS_LENGTH(oxfs->fs.header)) {
+           return &oxfs->fs;
+           } else {
+             return NULL;
+           }
+       }
+   }
+   return NULL;
+}
+
+static const struct oxs_field *
+oxs_field_by_id(enum oxs_ofb_stat_fields id, enum ofp_version version)
+{
+   const struct oxs_field_index *oxfs;
+   const struct oxs_field *fs=NULL;
+
+   oxs_init();
+
+   LIST_FOR_EACH (oxfs, ox_node, &oxs_ox_map[id]) {
+       if (!fs || version >= oxfs->fs.version) {
+           fs = &oxfs->fs;
+       }
+   }
+   return fs;
+}
+
+static void
+oxs_put_header__(struct ofpbuf *b, uint64_t header)
+{
+    ovs_be32 network_header = htonl(header);
+    ofpbuf_put(b, &network_header, oxs_header_len(header));
+}
+
+
+static void
+oxs_put_header_len(struct ofpbuf *b, enum oxs_ofb_stat_fields field,
+                   enum ofp_version version)
+{
+    uint32_t header = oxs_header_get(field, version);
+    header = OXS_HEADER(OXS_CLASS(header),
+                        OXS_FIELD(header),
+                        OXS_LENGTH(header));
+    oxs_put_header__(b, header);
+}
+
+void oxs_put__(struct ofpbuf *b, enum oxs_ofb_stat_fields field,
+               enum ofp_version version,
+               const void *value, const void *mask, size_t n_bytes)
+{
+    oxs_put_header_len(b, field, version);
+    ofpbuf_put(b, value, n_bytes);
+    if (mask) {
+        ofpbuf_put(b, mask, n_bytes);
+    }
+
+}
+
+static int
+ox_put_raw(struct ofpbuf *b, enum ofp_version oxs,
+           const struct ofputil_flow_stats *fs,
+           ovs_be64 cookie, ovs_be64 cookie_mask)
+{
+  const size_t start_len = b->size;
+  int stat_len;
+  if (oxs_field_set & 1<<0) {
+  uint64_t duration = 0;
+       if(fs){
+           duration = (uint64_t) fs->duration_sec << 32 |
+                      fs->duration_nsec;
+                      duration = htonll(duration);
+          }
+          oxs_put__(b, OFPXST_OFB_DURATION, oxs, &duration, NULL,
+                     OXS_STATS_DURATION_LEN);
+       }
+       if (oxs_field_set & 1<<1) {
+               uint64_t idl_time = 0;
+               if(fs){
+                        idl_time = (uint64_t)fs->idle_age <<32 ;
+                       idl_time = htonll(idl_time);
+               }
+               oxs_put__(b, OFPXST_OFB_IDLE_TIME, oxs, &idl_time, NULL,
+                          OXS_STATS_IDLE_TIME_LEN);
+       }
+       if (oxs_field_set & 1<<2) {
+               uint32_t flow_count = 0;
+                oxs_put__(b, OFPXST_OFB_FLOW_COUNT, oxs, &flow_count, NULL,
+                          OXS_STATS_FLOW_COUNT_LEN);
+       }
+       if (oxs_field_set & 1<<3) {
+               uint64_t pkt_count = 0;
+               if(fs){
+                     pkt_count = fs->packet_count;
+                    pkt_count = htonll(pkt_count);
+               }
+               oxs_put__(b, OFPXST_OFB_PACKET_COUNT, oxs, &pkt_count, NULL,
+                          OXS_STATS_PACKET_COUNT_LEN);
+       }
+       if (oxs_field_set & 1<<4) {
+               uint64_t byte_count = 0;
+               if(fs){
+                     byte_count = fs->byte_count;
+                    byte_count = htonll(byte_count);
+               }
+               oxs_put__(b, OFPXST_OFB_BYTE_COUNT, oxs, &byte_count, NULL,
+                          OXS_STATS_BYTE_COUNT_LEN);
+       }
+       if (cookie_mask) {
+               cookie &= cookie_mask;
+               oxs_put_header__(b, OXS_OX_COOKIE);
+               ofpbuf_put(b, &cookie, sizeof cookie);
+       }
+       stat_len = b->size - start_len;
+       return stat_len;
+}
+
+int
+oxs_put_stat(struct ofpbuf *b, const struct ofputil_flow_stats *fs,
+             enum ofp_version version)
+{
+    int stat_len;
+    struct ofp_oxs_stat *oxs;
+    size_t start_len = b->size;
+    ovs_be64 cookie = htonll(0), cookie_mask = htonll(0);
+    ofpbuf_put_uninit(b, sizeof *oxs);
+    stat_len = (ox_put_raw(b, version, fs, cookie, cookie_mask)
+                 + sizeof *oxs);
+    ofpbuf_put_zeros(b, PAD_SIZE(stat_len, 8));
+    oxs = ofpbuf_at(b, start_len, sizeof *oxs);
+    oxs->reserved = htons(0);
+    oxs->length = htons(stat_len);
+    return stat_len;
+}
 
