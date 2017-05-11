@@ -30,6 +30,9 @@ int oxs_put_stat(struct ofpbuf *, const struct ofputil_flow_stats *,
                  enum ofp_version);
 int oxs_pull_stat(struct ofpbuf *,struct ofputil_flow_stats *,
                   uint16_t *);
+int oxs_put_agg_stat(struct ofpbuf *, const struct ofputil_aggregate_stats *,
+                     enum ofp_version);
+int oxs_pull_agg_stat(struct ofpbuf , struct ofputil_aggregate_stats *);
 
 #endif /* ox_stat.h */
 

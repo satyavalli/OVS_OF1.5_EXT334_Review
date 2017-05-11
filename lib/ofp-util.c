@@ -3290,6 +3290,12 @@ ofputil_encode_aggregate_stats_reply(
     enum ofpraw raw;
 
     ofpraw_decode(&raw, request);
+    if(raw==OFPRAW_OFPST15_OXS_AGGREGATE_REQUEST) {
+    msg = ofpraw_alloc_stats_reply(request, 0);
+    enum ofp_version version = request->version;
+    oxs_put_agg_stat(msg,stats,version);
+    }
+    else {
     if (raw == OFPRAW_OFPST10_AGGREGATE_REQUEST) {
         packet_count = unknown_to_zero(stats->packet_count);
         byte_count = unknown_to_zero(stats->byte_count);
@@ -3303,6 +3309,7 @@ ofputil_encode_aggregate_stats_reply(
     put_32aligned_be64(&asr->packet_count, htonll(packet_count));
     put_32aligned_be64(&asr->byte_count, htonll(byte_count));
     asr->flow_count = htonl(stats->flow_count);
+    }
 
     return msg;
 }
@@ -3312,13 +3319,23 @@ ofputil_decode_aggregate_stats_reply(struct ofputil_aggregate_stats *stats,
                                      const struct ofp_header *reply)
 {
     struct ofpbuf msg = ofpbuf_const_initializer(reply, ntohs(reply->length));
-    ofpraw_pull_assert(&msg);
+    enum ofperr error;
+    enum ofpraw raw;
 
+    raw=ofpraw_pull_assert(&msg);
+    if (raw == OFPRAW_OFPST15_OXS_AGGREGATE_REPLY){
+      memset(stats, 0, sizeof(*stats));
+      error =  oxs_pull_agg_stat(msg, stats);
+      if(error)
+        return error;
+    }
+    else{
     struct ofp_aggregate_stats_reply *asr = msg.msg;
     stats->packet_count = ntohll(get_32aligned_be64(&asr->packet_count));
     stats->byte_count = ntohll(get_32aligned_be64(&asr->byte_count));
     stats->flow_count = ntohl(asr->flow_count);
 
+    }
     return 0;
 }
 

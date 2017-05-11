@@ -131,6 +131,9 @@ static const struct oxs_field *oxs_field_by_id(enum oxs_ofb_stat_fields,
 void oxs_put__(struct ofpbuf *b, enum oxs_ofb_stat_fields field,
                enum ofp_version version,
                const void *value, const void *mask, size_t n_bytes);
+static enum ofperr oxs_pull_agg_raw(const uint8_t *p, unsigned int stat_len,
+                                    struct ofputil_aggregate_stats *fs);
+
 static bool
 is_experimenter_oxs(uint64_t header)
 {
@@ -370,6 +373,82 @@ int oxs_pull_stat(struct ofpbuf *b,struct ofputil_flow_stats *fs,
                          NULL, NULL);
 }
 
+static enum ofperr
+oxs_pull_agg_raw(const uint8_t *p, unsigned int stat_len,
+                struct ofputil_aggregate_stats *fs)
+{
+    struct ofpbuf b = ofpbuf_const_initializer(p, stat_len);
+
+    while (b.size) {
+
+      uint64_t header;
+      unsigned int payload_len;
+      const struct oxs_field *field;
+      const uint8_t *payload;
+
+      oxs_pull_header__(&b,&header,&field);
+      payload_len = oxs_payload_len(header);
+      payload = ofpbuf_try_pull(&b, payload_len);
+
+      if(fs && field) {
+       switch(field->id)
+        {
+             case OFPXST_OFB_FLOW_COUNT:
+             {
+               uint32_t flow_count=0;
+               memcpy(&flow_count,payload,sizeof(flow_count));
+               fs->flow_count = ntohl(flow_count);
+             }
+             break;
+             case OFPXST_OFB_PACKET_COUNT:
+             {
+               uint64_t packet_count;
+               memcpy(&packet_count,payload,sizeof(packet_count));
+               fs->packet_count = ntohll(packet_count);
+             }
+             break;
+             case OFPXST_OFB_BYTE_COUNT:
+             {
+               uint64_t byte_count;
+               memcpy(&byte_count,payload,sizeof(byte_count));
+               fs->byte_count = ntohll(byte_count);
+            }
+             break;
+             case OFPXST_OFB_DURATION:
+             case OFPXST_OFB_IDLE_TIME:
+             break;
+        }
+
+     }
+
+    }
+    return 0;
+}
+
+int
+oxs_pull_agg_stat(struct ofpbuf b, struct ofputil_aggregate_stats *fs)
+{
+    struct  ofp_oxs_stat *oxs = b.data;
+    uint8_t *p;
+    uint16_t stat_len;
+
+    stat_len = ntohs(oxs->length);
+
+    if (stat_len < sizeof *oxs) {
+      return OFPERR_OFPBMC_BAD_LEN;
+    }
+
+    p = ofpbuf_try_pull(&b, ROUND_UP(stat_len, 8));
+    if (!p) {
+        VLOG_DBG_RL(&rl, "oxs length %u, rounded up to a "
+                    "multiple of 8, is longer than space in message (max "
+                    "length %"PRIu32")", stat_len, b.size);
+        return OFPERR_OFPBMC_BAD_LEN;
+    }
+
+    return oxs_pull_agg_raw(p + sizeof *oxs, stat_len - sizeof *oxs,fs);
+}
+
 static struct hmap oxs_header_map;
 static struct hmap oxs_name_map;
 
@@ -539,5 +618,65 @@ oxs_put_stat(struct ofpbuf *b, const struct ofputil_flow_stats *fs,
     oxs->reserved = htons(0);
     oxs->length = htons(stat_len);
     return stat_len;
+}
+
+static int
+ox_put_agg_raw(struct ofpbuf *b, enum ofp_version oxs,
+               const struct ofputil_aggregate_stats *fs)
+{
+   const size_t start_len = b->size;
+   int stat_len;
+
+   if (oxs_field_set & 1<<2) {
+     uint32_t flow_count = 0;
+     if(fs) {
+       flow_count=fs->flow_count;
+       flow_count=htonl(flow_count);
+     }
+     oxs_put__(b, OFPXST_OFB_FLOW_COUNT, oxs, &flow_count,
+                NULL, OXS_STATS_FLOW_COUNT_LEN);
+   }
+
+   if (oxs_field_set & 1<<3) {
+     uint64_t pkt_count = 0;
+    if(fs) {
+        pkt_count = fs->packet_count;
+        pkt_count = htonll(pkt_count);
+     }
+     oxs_put__(b, OFPXST_OFB_PACKET_COUNT, oxs, &pkt_count,
+               NULL, OXS_STATS_PACKET_COUNT_LEN);
+   }
+
+   if (oxs_field_set & 1<<4) {
+      uint64_t byte_count = 0;
+      if(fs) {
+        byte_count = fs->byte_count;
+        byte_count = htonll(byte_count);
+      }
+      oxs_put__(b, OFPXST_OFB_BYTE_COUNT, oxs, &byte_count,
+                NULL, OXS_STATS_BYTE_COUNT_LEN);
+   }
+
+   stat_len = b->size - start_len;
+   return stat_len;
+}
+
+int
+oxs_put_agg_stat(struct ofpbuf *b, const struct ofputil_aggregate_stats *fs,
+                 enum ofp_version version)
+{
+   int stat_len;
+   struct ofp_oxs_stat *oxs;
+   size_t start_len = b->size;
+
+   ofpbuf_put_uninit(b, sizeof *oxs);
+   stat_len = (ox_put_agg_raw(b, version, fs)
+                + sizeof *oxs);
+   ofpbuf_put_zeros(b, PAD_SIZE(stat_len, 8));
+   oxs = ofpbuf_at(b, start_len, sizeof *oxs);
+   oxs->reserved = htons(0);
+   oxs->length = htons(stat_len);
+
+   return stat_len;
 }
 
