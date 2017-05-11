@@ -8092,6 +8092,9 @@ handle_openflow__(struct ofconn *ofconn, const struct ofpbuf *msg)
     case OFPTYPE_FLOW_STATS_REQUEST:
         return handle_flow_stats_request(ofconn, oh);
 
+    case OFPTYPE_OXS_FLOW_STATS_REQUEST:
+        return handle_flow_stats_request(ofconn, oh);
+
     case OFPTYPE_AGGREGATE_STATS_REQUEST:
         return handle_aggregate_stats_request(ofconn, oh);
 
@@ -8167,6 +8170,7 @@ handle_openflow__(struct ofconn *ofconn, const struct ofpbuf *msg)
     case OFPTYPE_QUEUE_GET_CONFIG_REPLY:
     case OFPTYPE_DESC_STATS_REPLY:
     case OFPTYPE_FLOW_STATS_REPLY:
+    case OFPTYPE_OXS_FLOW_STATS_REPLY:
     case OFPTYPE_QUEUE_STATS_REPLY:
     case OFPTYPE_PORT_STATS_REPLY:
     case OFPTYPE_TABLE_STATS_REPLY:

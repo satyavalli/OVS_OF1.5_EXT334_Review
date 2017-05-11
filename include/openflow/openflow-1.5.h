@@ -150,4 +150,52 @@ struct ofp15_group_desc_stats {
 };
 OFP_ASSERT(sizeof(struct ofp15_group_desc_stats) == 16);
 
+struct ofp_oxs_stat {
+    ovs_be16 reserved;              /* One of OFPST_* */
+    ovs_be16 length;                /* Stats Length */
+};
+OFP_ASSERT(sizeof(struct ofp_oxs_stat) == 4);
+
+/*Body for ofp_multipart_request of type
+  OFPMP_FLOW_DESC & OFPMP_FLOW_STATS.*/
+struct ofp15_oxs_flow_stats_request {
+    uint8_t table_id;                 /* ID of table to read
+                                         (from ofp_table_desc),
+                                         OFPTT_ALL for all tables. */
+    uint8_t pad[3];                   /* Align to 32 bits. */
+    ovs_be32 out_port;                /* Require matching entries to include
+                                         this as an output port. A value of
+                                         OFP_ANY indicates no restriction. */
+    ovs_be32 out_group;               /* Require matching entries to include
+                                         this as an output group. A value of
+                                         OFPG_ANY indicates no restriction. */
+    uint8_t pad2[4];                  /* Align to 64 bits. */
+    ovs_be64 cookie;                  /* Require matching entries to contain
+                                         this cookie value */
+    ovs_be64 cookie_mask;             /* Mask used to restrict the cookie bits
+                                         that must match. A value of 0
+                                         indicates no restriction. */
+};
+OFP_ASSERT(sizeof(struct ofp15_oxs_flow_stats_request) == 32);
+
+/* Body of reply to OFPMP_FLOW_STATS request
+* and body for OFPIT_STAT_TRIGGER generated status. */
+struct ofp15_oxs_flow_stats_reply {
+    ovs_be16 length;     /* Length of this entry.       */
+    uint8_t pad2[2];     /* Align to 64-bits.           */
+    uint8_t table_id;    /* ID of table flow came from. */
+    uint8_t reason;      /* One of OFPFSR_*.            */
+    ovs_be16 priority;   /* Priority of the entry.      */
+};
+OFP_ASSERT(sizeof(struct ofp15_oxs_flow_stats_reply) == 8);
+
+/* OXS flow stat field types for OpenFlow basic class. */
+enum oxs_ofb_stat_fields {
+    OFPXST_OFB_DURATION      = 0,   /* Time flow entry has been alive.    */
+    OFPXST_OFB_IDLE_TIME     = 1,   /* Time flow entry has been idle.     */
+    OFPXST_OFB_FLOW_COUNT    = 2,   /* Number of aggregated flow entries. */
+    OFPXST_OFB_PACKET_COUNT  = 3,   /* Number of packets in flow entry.   */
+    OFPXST_OFB_BYTE_COUNT    = 4,   /* Number of bytes in flow entry.     */
+};
+
 #endif /* openflow/openflow-1.5.h */

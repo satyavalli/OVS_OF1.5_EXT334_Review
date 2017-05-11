@@ -197,6 +197,8 @@ lib_libopenvswitch_la_SOURCES = \
 	lib/ovsdb-parser.h \
 	lib/ovsdb-types.c \
 	lib/ovsdb-types.h \
+        lib/ox-stat.c \
+        lib/ox-stat.h \
 	lib/packets.c \
 	lib/packets.h \
 	lib/pcap-file.c \

@@ -3563,6 +3563,11 @@ ofp_to_string__(const struct ofp_header *oh, enum ofpraw raw,
         ofp_print_flow_stats_request(string, oh);
         break;
 
+    case OFPTYPE_OXS_FLOW_STATS_REQUEST:
+        ofp_print_stats(string, oh);
+        ofp_print_flow_stats_request(string, oh);
+        break;
+
     case OFPTYPE_TABLE_STATS_REQUEST:
         ofp_print_stats(string, oh);
         break;
@@ -3583,6 +3588,11 @@ ofp_to_string__(const struct ofp_header *oh, enum ofpraw raw,
         break;
 
     case OFPTYPE_FLOW_STATS_REPLY:
+        ofp_print_stats(string, oh);
+        ofp_print_flow_stats_reply(string, oh);
+        break;
+
+    case OFPTYPE_OXS_FLOW_STATS_REPLY:
         ofp_print_stats(string, oh);
         ofp_print_flow_stats_reply(string, oh);
         break;

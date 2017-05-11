@@ -41,6 +41,8 @@
 #include "socket-util.h"
 #include "util.h"
 
+extern uint8_t oxs_field_set;
+
 /* Parses 'str' as an 8-bit unsigned integer into '*valuep'.
  *
  * 'name' describes the value parsed in an error message, if any.
@@ -186,6 +188,34 @@ str_to_connhelper(const char *str, uint16_t *alg)
         return NULL;
     }
     return xasprintf("invalid conntrack helper \"%s\"", str);
+}
+
+struct ox_fields {
+    const char *name;
+    uint16_t fl_type;
+};
+
+static bool
+parse_oxs_field(const char *name, const struct ox_fields **f_out)
+{
+   static const struct ox_fields fields[] = {
+                       { "oxs-duration", OFPXST_OFB_DURATION },
+                       { "oxs-idle_time", OFPXST_OFB_IDLE_TIME },
+                       { "oxs-flow_count", OFPXST_OFB_FLOW_COUNT },
+                       { "oxs-packet_count", OFPXST_OFB_PACKET_COUNT },
+                       { "oxs-byte_count", OFPXST_OFB_BYTE_COUNT },
+   };
+
+   const struct ox_fields *f;
+
+   for (f = fields; f < &fields[ARRAY_SIZE(fields)]; f++) {
+      if (!strcmp(f->name, name)) {
+          *f_out = f;
+          return true;
+      }
+   }
+   *f_out = NULL;
+   return false;
 }
 
 struct protocol {
@@ -406,10 +436,23 @@ parse_ofp_str__(struct ofputil_flow_mod *fm, int command, char *string,
 
     while (ofputil_parse_key_value(&string, &name, &value)) {
         const struct protocol *p;
+        const struct ox_fields *f;
         const struct mf_field *mf;
         char *error = NULL;
 
-        if (parse_protocol(name, &p)) {
+        if (parse_oxs_field(name, &f)) {
+            if(f->fl_type == OFPXST_OFB_DURATION) {
+                oxs_field_set |= 1<<0;
+            } else if(f->fl_type == OFPXST_OFB_IDLE_TIME) {
+                oxs_field_set |= 1<<1;
+            } else if(f->fl_type == OFPXST_OFB_FLOW_COUNT) {
+                oxs_field_set |= 1<<2;
+            } else if(f->fl_type == OFPXST_OFB_PACKET_COUNT) {
+                oxs_field_set |= 1<<3;
+            } else if(f->fl_type == OFPXST_OFB_BYTE_COUNT) {
+                oxs_field_set |= 1<<4;
+            }
+        } else if (parse_protocol(name, &p)) {
             match_set_dl_type(&fm->match, htons(p->dl_type));
             if (p->nw_proto) {
                 match_set_nw_proto(&fm->match, p->nw_proto);
