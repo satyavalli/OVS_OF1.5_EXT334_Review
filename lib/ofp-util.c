@@ -2805,6 +2805,11 @@ ofputil_decode_flow_stats_request(struct ofputil_flow_stats_request *fsr,
         return ofputil_decode_ofpst15_flow_request(fsr, &b, false, tun_table,
                                                    vl_mff_map);
 
+    case OFPRAW_OFPST15_OXS_AGGREGATE_REQUEST:
+        oxs_field_set = 0;
+        return ofputil_decode_ofpst15_flow_request(fsr, &b, true, tun_table,
+                                                   vl_mff_map);
+
     case OFPRAW_NXST_FLOW_REQUEST:
         return ofputil_decode_nxst_flow_request(fsr, &b, false, tun_table,
                                                 vl_mff_map);
@@ -2834,7 +2839,7 @@ ofputil_encode_flow_stats_request(const struct ofputil_flow_stats_request *fsr,
     case OFPUTIL_P_OF16_OXM: {
         struct ofp15_oxs_flow_stats_request *ofsr;
         raw = (fsr->aggregate
-               ? OFPRAW_OFPST11_AGGREGATE_REQUEST
+               ? OFPRAW_OFPST15_OXS_AGGREGATE_REQUEST
                : OFPRAW_OFPST15_OXS_FLOW_REQUEST);
         msg = ofpraw_alloc(raw, ofputil_protocol_to_ofp_version(protocol),
                            ofputil_match_typical_len(protocol));
@@ -10268,6 +10273,7 @@ ofputil_is_bundlable(enum ofptype type)
     case OFPTYPE_FLOW_STATS_REQUEST:
     case OFPTYPE_OXS_FLOW_STATS_REQUEST:
     case OFPTYPE_AGGREGATE_STATS_REQUEST:
+    case OFPTYPE_OXS_AGGREGATE_STATS_REQUEST:
     case OFPTYPE_TABLE_STATS_REQUEST:
     case OFPTYPE_TABLE_FEATURES_STATS_REQUEST:
     case OFPTYPE_TABLE_DESC_REQUEST:
@@ -10300,6 +10306,7 @@ ofputil_is_bundlable(enum ofptype type)
     case OFPTYPE_PORT_STATS_REPLY:
     case OFPTYPE_TABLE_STATS_REPLY:
     case OFPTYPE_AGGREGATE_STATS_REPLY:
+    case OFPTYPE_OXS_AGGREGATE_STATS_REPLY:
     case OFPTYPE_PORT_DESC_STATS_REPLY:
     case OFPTYPE_ROLE_REPLY:
     case OFPTYPE_FLOW_MONITOR_PAUSED:
